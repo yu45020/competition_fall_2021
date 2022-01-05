@@ -4,6 +4,7 @@ data/
 training_logs/
 .history/
 *.csv
+submission/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
