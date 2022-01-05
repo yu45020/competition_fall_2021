@@ -1,0 +1,194 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options:
+  chunk_output_type: console
+---
+```{r, include=FALSE}
+knitr::opts_chunk$set(fig.width = 6, fig.height = 5,  
+                      warning = FALSE, message = FALSE,
+                      cache = TRUE)
+
+```
+
+```{r}
+library(data.table)
+library(rio)
+library(ggpubr)
+library(rstatix)
+library(plotrix)
+library(scales)
+```
+
+```{r}
+dat_train = rio::import('data/train_sample.dta',setclass = 'data.table')
+dat_train[, type :="train"]
+dat_test = rio::import('data/test_sample.dta',setclass = "data.table")
+dat_test[, type:='test']
+dat = rbindlist(list(dat_train, dat_test),fill = TRUE, use.names = TRUE)
+```
+
+```{r}
+get_rate_per_group = function(col_name,  col_type="type"){
+  dat_ = dat[,.(count=.N), by=c(col_name, col_type)]
+  dat_ = dat_[, rate:= count/sum(count), by=c(col_type)]
+  dat_ = dcast(dat_, paste0(col_name, '~', col_type),value.var = "rate")
+  dat_[, diff := train-test]
+  return(dat_)
+  }
+
+```
+
+
+# Goal 
+The goal is to predict  `incwage` (in integer), and the evaluation metric is mean square error.
+
+
+# Distribution on Income
+
+The average income is 54,278, but median is 38,000. The top 10% quantile is 110,000, and top 5% quantile is 150,000. However, bottom 5% is 2,100, and bottom 10% is 5000. 
+
+We expect large gap between observations.
+The raw income distribution is skewed. 
+```{r}
+summary(dat_train$incwage)
+quant_vars = quantile(dat_train$incwage, probs = c(0.05, 0.1, 0.5, 0.9,0.95))
+print("Quantils: ")
+print(quant_vars)
+ggdensity(dat_train, 
+          x="incwage",
+          title="Income Distribution on Train sample",
+          subtitle="Dashed lines are 5%, 10%, 50%, 90%, 95% quantiles")  +
+  geom_vline(xintercept = as.numeric(quant_vars), 
+             color="red", linetype="dashed")
+
+```
+
+But the log(income) is approximately normal. 
+```{r}
+dat_train[, incwage_log := log(incwage)]
+ggdensity(dat_train, 
+          x="incwage_log",
+          title="Income Distribution on Train sample",
+          xlab = "log(incwage)",
+          subtitle="Dashed lines are 5%, 10%, 50%, 90%, 95% quantiles")  +
+  geom_vline(xintercept = as.numeric(log(quant_vars)), 
+             color="red", linetype="dashed") + 
+  scale_x_continuous(breaks=seq(-10,20,2))
+ggsave("report/imgs/distribution_log_income.png", width=6, height=4)
+```
+
+
+# Distribution on Independent Variables 
+
+We combine train and test to see whether there are significant difference. The ratio of each type are almost the same in train and test group. 
+
+## Categorical Variables 
+Categorical variables include `sex`, `age`, `marst` (marriage), `race`, `bpl` (birth place), `language`, `educ`, `degfield` (degree field), `occ` (occupation), and `vetstat` (veteran status). 
+
+All variables are pre-encoded into numbers.
+
+If we only look at single variable against income, we have the following :
+* male(sex=1) has slightly higher income than female (sex=2)
+
+* married (marst=1) has the most observation and highest income; but single (marst=6) has the second most observation and lowest income
+
+* white (race=1) has the most observation but income ranks at 4th; Chinese, Japanese, other asian (race=4,5,6) have less observations but highest income
+
+* EU member counties (bpl in 400 range) have the highest income
+
+* minority language speakers have the highest average income 
+
+* 5 years + college (educ=5) and 4 years + (educ=4) are the top earners. 
+
+* Engineering, Transportation Sciences and Technologies, Biology and Life Sciences (degfield = 24, 59, 36) have the highest avg income. 
+
+
+If we use embedding for each category variables, `degfield` shall get special attention, followed by `educ` as they seem to have high predictive power. `language` and `bpl` may need to consider sparse setting as the majority speakers are English speakers born within the U.S., but they have diverse income.  
+
+```{r, }
+cat_vars = c("sex", "marst", "race", "bpl", "language", "educ", "degfield", "vetstat")
+for(i in cat_vars){
+  cat(paste('###', i, "\n"))
+  num_unique = dat[,uniqueN(get(i))]
+  dat_cat = get_rate_per_group(i)
+  print(sprintf("Number of unique values for %s: %i", i, num_unique))
+  print("Summary on Train/Test rate for group count")
+  print(summary(dat_cat$diff))
+  if(num_unique <20){
+    p = gghistogram(dat, i, "..density..",
+                binwidth = 1, fill="type", 
+                position=position_dodge(width = 0.8),
+                title = sprintf("Distribution on %s", i)) + 
+      scale_x_continuous(breaks = seq(0,20,1))
+    print(p)
+  }
+  cat(sprintf("Train Data: check Incwage ~ %s", i))
+  dat_summary = dat_train[,.(avg = mean(incwage), 
+                             std = std.error(incwage), 
+                             count = .N), by=c(i)]
+  dat_summary[, `:=`(lower = avg - std, upper = avg + std)]
+  dat_summary[, ratio := percent(count/sum(count),accuracy=0.01)]
+  setorder(dat_summary, -avg)
+  dat_summary = head(dat_summary, 10)
+  dat_summary[, (i):= factor(get(i))]
+
+  p4 = ggplot(data=dat_summary, mapping=aes(x=reorder(get(i), -avg), 
+                                            y=avg,fill=get(i) )) + 
+    geom_bar(stat="identity", color="black") + 
+    geom_errorbar(aes(ymin=lower, ymax=upper), width=0.5) +
+    labs(title="Top 10 Avg Income Per Group", 
+         y= "Avg Incwage",
+         x=i) + 
+    scale_y_continuous(labels = number_format(big.mark = ',')) + 
+    geom_text(aes(label = ratio),  vjust = 1.5) + 
+    theme_pubr(legend='none')
+  print(p4)
+  
+  }
+```
+
+## Numeric Variables 
+
+`age`, `uhrswork` (usual hours worked per week; top at 99), and `wkswork1` (weeks worked last year)
+ are treated as continuous variables. I perform Kruskal-Wallis test, a non-parametric one-way ANOVA, to check whether train and test have same means. The null hypothesis is that the distributions are the same in each group.
+
+ 
+  
+All have perfect matches on ratios between train and test. 
+
+Age, Age square, and hours worked per week are  non-linear with log(income)
+
+```{r, }
+num_vars = c("age", "uhrswork", "wkswork1")
+
+for(i in num_vars) {
+  cat(paste('###', i, "\n"))
+  p1 = gghistogram(dat, x=i,y="..density..", fill="type",
+            position = position_dodge(width = 0.8),
+            title=sprintf("Distribution on: %s", i))
+  p2 = ggboxplot(data=dat, x="type", y=i, 
+                 bxp.errorbar=TRUE, outlier.shape = NA,
+                 fill="type", 
+                 title=sprintf("Distribution on: %s", i))
+  print(p1)
+  print(p2)
+  print(kruskal.test(formula = as.formula(paste0(i,"~ type")), data=dat))
+
+  p3 = ggplot(data=dat_train, mapping=aes(x=get(i), y=log(incwage))) + 
+  geom_smooth(se=TRUE) + 
+  labs(title=sprintf("log(Incwage) ~ %s",i), 
+       subtitle="GAM Smoothed",
+       x=i) + 
+  theme_pubr()
+  print(p3)
+}
+```
+ 
+
+ 

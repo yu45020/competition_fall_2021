@@ -1,0 +1,112 @@
+---
+title: "R Notebook"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(fig.width = 6, fig.height = 5,  
+                      warning = FALSE, message = FALSE,
+                      cache = TRUE)
+
+```
+
+```{r}
+library(data.table)
+library(rio)
+library(ggpubr)
+library(rstatix)
+library(plotrix)
+library(scales)
+```
+
+```{r}
+dat = fread("data/full_train_pred.csv")
+dat[, y := exp(y)]
+dat[, y_pred := exp(y_pred)]
+dat[, diff := y - y_pred]
+dat[, diff_log := log(y) - log(y_pred)]
+dat[, diff_abs := abs(y-y_pred)]
+print(sprintf("Mean Square Error: %f", dat[, mean((y - y_pred)^2)]))
+```
+
+# Over-predicted 
+There are 24.49% of data are over-predicted more than 10,000 and 25.99% under predicted. Most of them are high school graudate and graduate student. Graduate students have the largest under predicted income.
+
+Age starts from 16. 
+```{r}
+ 
+dat_over = dat[abs(diff) > 10000]
+dat_over[diff > 0, diff_type := "under-predicted" ]
+dat_over[diff < 0, diff_type := "over-predicted" ]
+
+
+dat_over[,.N/dim(dat)[1], by=diff_type] 
+
+dat_error_educ = dat_over[,.( avg = mean(abs(diff)),
+                              std = plotrix::std.error(diff_abs)),
+                          by=.(educ, diff_type)]
+setorder(dat_error_educ, educ)
+ggbarplot(dat_error_educ, x="educ", y="avg", fill="diff_type", 
+          position=position_dodge(width=0.8))
+
+
+
+gghistogram(dat_over, x="educ", binwidth = 1, y="..density..",
+            fill='diff_type', position = position_dodge(width=0.8),
+            title="Histogram on Education from Over Predicted > 10,000",
+            xlab="Education") + 
+  scale_x_continuous(breaks=seq(0,11,1))
+ggsave(  "reports/imgs/error_analysis_on_educ.png", width=6, height=5)
+
+```
+  
+ 
+ 
+And largest errors are from seniors and young people. 
+
+```{r}
+dat_over[ educ <=5 , educ_type  := "1 Pre High school" ]
+dat_over[ educ==6 , educ_type  := "3 High School Graduate" ]
+dat_over[ between(educ, 7, 10) , educ_type  := "4 Undergraduate" ]
+dat_over[ educ >=11 , educ_type  := "5 Graduate" ]
+
+```
+
+```{r}
+
+p = ggplot(data=dat_over , mapping = aes(x=age , y=diff,color=diff_type )) + 
+  geom_smooth() + theme_pubr()  + 
+  labs(title="Prediction Error on Age Smoothed by GAM", 
+       subtitle="subsets on errors larger than 10,000",
+       y="Difference", x="Age")
+p = facet(p, "educ_type",short.panel.labs=FALSE, ncol = 2) 
+ggsave( "reports/imgs/error_analysis_on_age.png", p, width=8, height=8)
+```
+
+```{r}
+
+p = ggplot(data=dat_over , mapping = aes(x=uhrswork , y=diff,color=diff_type )) + 
+  geom_smooth() + theme_pubr()  + 
+  labs(title="Prediction Error on uhrswork Smoothed by GAM", 
+       subtitle="subsets on errors larger than 10,000",
+       y="Difference", x="Hours Work")
+p = facet(p, "educ_type",short.panel.labs=FALSE, ncol = 2) 
+ggsave( "reports/imgs/error_analysis_on_uhrswork.png", p, width=8, height=8)
+```
+
+
+```{r}
+
+p = ggplot(data=dat_over , mapping = aes(x=wkswork1 , y=diff,color=diff_type )) + 
+  geom_smooth() + theme_pubr()  + 
+  labs(title="Prediction Error on wkswork1 Smoothed by GAM", 
+       subtitle="subsets on errors larger than 10,000",
+       y="Difference", x="Weeks")
+p = facet(p, "educ_type",short.panel.labs=FALSE, ncol = 2) 
+ggsave( "reports/imgs/error_analysis_on_wkswork1.png", p, width=8, height=8)
+```
+
+
+ 
