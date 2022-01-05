@@ -1,7 +1,9 @@
 *.idea
-checkpoint/
+checkpoints/
 data/
 training_logs/
+.history/
+*.csv
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
