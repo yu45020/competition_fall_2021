@@ -1,0 +1,20 @@
+\begin{table}[ht]
+\caption{Transformers in Test Set}
+\label{tab:architeture}
+\centering \vspace{1em}
+\begin{tabular}{llllll}
+\hline
+LR & E    & FF &  N & Parameters       & MSE   \\
+\hline
+8e-4          & 128          & 512          & 4                  & 1.442 M          & NA              \\
+6e-4          & 128          & 512          & 4                  & 1.442 M          & 0.5745          \\
+4e-4          & 128          & 512          & 4                  & 1.442 M          & 0.5842          \\
+6e-4          & 64           & 256          & 4                  & 0.393 M          & 0.6269          \\
+6e-4          & 256          & 1024         & 4                  & 5.506 M          & 0.5578          \\
+\textbf{6e-4} & \textbf{128} & \textbf{512} & \textbf{6}         & \textbf{2.100 M} & \textbf{0.5562} \\
+6e-4          & 128          & 512          & 6                  & 2.100 M          & 0.5591          \\
+4e-4          & 128          & 512          & 6                  & 2.100 M          & 0.5641          \\
+6e-4          & 128          & 256          & 6                  & 1.507 M          & 0.5865       \\ 
+\hline
+\end{tabular}
+\end{table}
